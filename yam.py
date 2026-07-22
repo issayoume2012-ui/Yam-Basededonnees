@@ -27,7 +27,8 @@ SMTP_PASSWORD = "qwhvzfvheaacdtsp"           # Mot de passe d'application Gmail
 APP_URL = "http://localhost:8501"            # Remplacez par votre URL de production
 
 # ==========================================
-# 0. BASE DE DONNÉES & INITIALISATION
+# ==========================================
+# 0. BASE DE DONNÉES & FONCTIONS UTILITAIRES
 # ==========================================
 UPLOAD_DIR = "uploads"
 if not os.path.exists(UPLOAD_DIR):
@@ -39,6 +40,43 @@ def get_db():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
+
+def execute_db(query, params=()):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(query, params)
+    conn.commit()
+    last_id = cursor.lastrowid
+    conn.close()
+    return last_id
+
+def query_db(query, params=(), one=False):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(query, params)
+    rv = cursor.fetchall()
+    conn.close()
+    return (rv[0] if rv else None) if one else rv
+
+def query_df(query, params=()):
+    conn = get_db()
+    try:
+        df = pd.read_sql_query(query, conn, params=params)
+    except Exception:
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        data = cursor.fetchall()
+        columns = [description[0] for description in cursor.description] if cursor.description else []
+        df = pd.DataFrame(data, columns=columns)
+    finally:
+        conn.close()
+    return df
+
+def log_acces(email, action, statut, details=""):
+    execute_db("""
+        INSERT INTO me_logs_acces (user_email, action, date_evenement, statut, details)
+        VALUES (?, ?, ?, ?, ?)
+    """, (email, action, str(datetime.now()), statut, details))
 
 def init_db():
     conn = get_db()
