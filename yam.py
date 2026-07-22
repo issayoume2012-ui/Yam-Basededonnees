@@ -60,13 +60,18 @@ def query_db(query, params=(), one=False):
 def query_df(query, params=()):
     conn = get_db()
     try:
-        df = pd.read_sql_query(query, conn, params=params)
-    except Exception:
         cursor = conn.cursor()
         cursor.execute(query, params)
         data = cursor.fetchall()
+        # Récupération sécurisée des colonnes
         columns = [description[0] for description in cursor.description] if cursor.description else []
         df = pd.DataFrame(data, columns=columns)
+    except Exception as e:
+        # En cas d'erreur (table inexistante ou autre), on renvoie un DataFrame vide au lieu de crasher
+        df = pd.DataFrame()
+    finally:
+        conn.close()
+    return df
     finally:
         conn.close()
     return df
