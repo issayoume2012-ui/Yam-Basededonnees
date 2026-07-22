@@ -255,7 +255,6 @@ def envoyer_mail_demande_autorisation(user_email, token):
             server.sendmail(SMTP_SENDER, ADMIN_EMAIL, msg.as_string())
         return True
     except Exception as e:
-        # Si SMTP non configuré, le système enregistre tout de même la demande en BDD
         return False
 
 # ==========================================
@@ -313,7 +312,6 @@ def auth_system():
     if st.session_state.user is None:
         st.title("🌾 AgriGestion Pro")
         
-        # Écran d'attente lors d'une demande envoyée
         if st.session_state.pending_token:
             st.info("⏳ **Votre demande d'accès a été enregistrée et transmise à l'administrateur (issayoume2012@gmail.com).**")
             st.write("Veuillez patienter pendant la vérification. Dès que l'administrateur valide votre demande via l'e-mail ou son panneau d'administration, vous pourrez accéder à l'application.")
@@ -340,7 +338,6 @@ def auth_system():
                         st.rerun()
             return False
 
-        # Formulaires Connexion / Inscription
         tab_login, tab_register = st.tabs(["🔑 Connexion", "📝 Inscription"])
 
         with tab_login:
@@ -351,22 +348,18 @@ def auth_system():
                 if not gmail_in or not pwd_in:
                     st.warning("⚠️ Veuillez remplir tous les champs.")
                 else:
-                    # 1. Vérification dans la Whitelist
                     in_whitelist = query_db("SELECT * FROM me_whitelist_emails WHERE email = ?", (gmail_in,), one=True)
                     if not in_whitelist:
                         st.error("❌ Accès Refusé : Cet e-mail n'est pas pré-autorisé sur la Liste Blanche.")
                         log_acces(gmail_in, "LOGIN_ATTEMPT", "BLOQUÉ_WHITELIST", "Adresse absente de la liste blanche.")
                     else:
-                        # 2. Vérification des identifiants
                         user = query_db("SELECT * FROM me_tech WHERE gmail = ? AND password = ?", (gmail_in, pwd_in), one=True)
                         if user:
-                            # Si c'est l'administrateur principal, accès immédiat
                             if gmail_in == ADMIN_EMAIL.lower():
                                 st.session_state.user = dict(user)
                                 log_acces(gmail_in, "LOGIN_ADMIN", "SUCCÈS", "Accès administrateur direct.")
                                 st.rerun()
                             else:
-                                # 3. Création et transmission de la demande d'accès
                                 token = secrets.token_hex(16)
                                 execute_db("""
                                     INSERT INTO me_autorisations (user_email, token, statut, date_demande)
@@ -441,7 +434,6 @@ tabs_titles = [
     "📅 Travaux & Matériel", "🐓 Élevage", "🐟 Pisciculture", "🌾 Récoltes", "💰 Finances", "📄 Rapports Automatisés"
 ]
 
-# Panneau Sécurité visible uniquement pour l'administrateur principal
 if USER_DATA['gmail'].lower() == ADMIN_EMAIL.lower():
     tabs_titles.append("🛡️ Demandes d'Accès & Sécurité")
 
@@ -532,10 +524,9 @@ with main_tabs[1]:
 
     with comm_t1:
         st.write("#### 📢 Messages, Annonces & Alertes Partagées")
-        
         with st.form("f_post_comm", clear_on_submit=True):
             type_m = st.selectbox("Type d'annonce", ["INFO (Information)", "ALERTE (Sanitaire/Météo)", "QUESTION (Besoin d'aide)"])
-            msg_comm = st.text_area("Votre message pour l'équipe *", placeholder="Rédigez un message, une observation terrain ou une alerte...")
+            msg_comm = st.text_area("Votre message pour l'équipe *", placeholder="Rédigez un message...")
             if st.form_submit_button("Publier sur le réseau"):
                 if msg_comm:
                     nom_auteur = f"{USER_DATA['prenom']} {USER_DATA['nom']}"
@@ -560,7 +551,6 @@ with main_tabs[1]:
 
     with comm_t2:
         st.write("#### 📖 Centre de Documentation & Fiches Techniques")
-        
         with st.expander("➕ Rédiger et Partager une nouvelle Fiche Technique"):
             with st.form("f_add_note_comm", clear_on_submit=True):
                 t_note = st.text_input("Titre de la Fiche *", placeholder="Ex: Traitement bio contre le mildiou")
@@ -645,346 +635,263 @@ with main_tabs[2]:
             p_target = st.selectbox("Sélectionner la parcelle active :", champs_df['nom'].tolist(), index=list(champs_df['nom']).index(parcelle_active_nom))
             if st.button("Activer cette Parcelle"):
                 st.session_state.selected_parcelle_name = p_target
-                st.success(f"Parcelle '{p_target}' chargée !")
+                st.success(f"Parcelle active changée : {p_target}")
                 st.rerun()
 
 # --- TAB 4 : PERSONNEL & ÉQUIPES ---
 with main_tabs[3]:
-    st.subheader("👥 Gestion du Personnel & Équipes")
-    sub_t1, sub_t2, sub_t3 = st.tabs(["📋 Registre du Personnel", "➕ Nouvel Employé", "👨‍👩‍👧‍👦 Équipes"])
+    st.subheader("👥 Gestion des Ressources Humaines & Équipes")
+    rh_t1, rh_t2 = st.tabs(["👨‍🌾 Employés", "👨‍👩‍👧‍👦 Équipes de Travail"])
 
-    with sub_t1:
-        employes = query_df("SELECT e.*, g.nom_groupe FROM me_employes e LEFT JOIN me_equipes g ON e.groupe_id = g.id WHERE e.user_id = ?", (USER_ID,))
-        if not employes.empty:
-            st.dataframe(employes[["id", "nom", "role", "type_contrat", "tarif_journalier", "salaire_mensuel", "matricule_emp", "nom_groupe"]], use_container_width=True)
-        else:
-            st.info("Aucun employé enregistré.")
+    with rh_t1:
+        with st.expander("➕ Ajouter un nouvel employé"):
+            with st.form("f_add_emp", clear_on_submit=True):
+                nom_emp = st.text_input("Nom & Prénom *")
+                role_emp = st.text_input("Fonction / Rôle", value="Ouvrier Agricole")
+                contrat_emp = st.selectbox("Type de Contrat", ["Journalier", "Permanent (Mensuel)", "Saisonnier"])
+                tarif_j = st.number_input("Tarif Journalier (FCFA)", min_value=0.0, value=3000.0)
+                sal_m = st.number_input("Salaire Mensuel Fixe (FCFA)", min_value=0.0, value=0.0)
+                if st.form_submit_button("Enregistrer Employé"):
+                    if nom_emp:
+                        execute_db("""
+                            INSERT INTO me_employes (user_id, nom, role, type_contrat, tarif_journalier, salaire_mensuel)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        """, (USER_ID, nom_emp, role_emp, contrat_emp, tarif_j, sal_m))
+                        st.success("Employé ajouté !")
+                        st.rerun()
 
-    with sub_t2:
-        with st.form("f_emp", clear_on_submit=True):
-            nom_e = st.text_input("Nom Complet *")
-            role_e = st.text_input("Rôle / Poste", value="Ouvrier Agricole")
-            contract_e = st.selectbox("Type de Contrat", ["Journalier", "Permanent / Mensuel", "Temporaire"])
-            tarif_e = st.number_input("Tarif Journalier (FCFA)", value=0.0)
-            sal_e = st.number_input("Salaire Mensuel (FCFA)", value=0.0)
-            mat_e = st.text_input("Matricule", value=f"EMP-{secrets.token_hex(2).upper()}")
-            
-            equipes_list = query_df("SELECT id, nom_groupe FROM me_equipes WHERE user_id = ?", (USER_ID,))
-            grp_opts = {"Aucune équipe": None}
-            if not equipes_list.empty:
-                for _, r in equipes_list.iterrows():
-                    grp_opts[r['nom_groupe']] = r['id']
-            sel_grp = st.selectbox("Équipe rattachée", list(grp_opts.keys()))
+        emp_df = query_df("SELECT id, nom, role, type_contrat, tarif_journalier, salaire_mensuel FROM me_employes WHERE user_id = ?", (USER_ID,))
+        st.dataframe(emp_df, use_container_width=True)
 
-            if st.form_submit_button("Enregistrer l'Employé"):
-                if nom_e:
-                    execute_db("""
-                        INSERT INTO me_employes (user_id, nom, role, groupe_id, type_contrat, tarif_journalier, salaire_mensuel, matricule_emp)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (USER_ID, nom_e, role_e, grp_opts[sel_grp], contract_e, tarif_e, sal_e, mat_e))
-                    st.success("Employé enregistré avec succès !")
-                    st.rerun()
-
-    with sub_t3:
-        st.write("#### Groupes & Équipes de Travail")
-        with st.form("f_grp", clear_on_submit=True):
-            nom_g = st.text_input("Nom de l'Équipe *")
+    with rh_t2:
+        with st.form("f_add_grp", clear_on_submit=True):
+            nom_g = st.text_input("Nom du Groupe / Équipe *", placeholder="Ex: Équipe Désherbage 1")
             chef_g = st.text_input("Chef d'Équipe")
-            if st.form_submit_button("Créer l'Équipe"):
+            membres_g = st.text_area("Membres (Séparés par des virgules)")
+            if st.form_submit_button("Créer L'Équipe"):
                 if nom_g:
-                    execute_db("INSERT INTO me_equipes (user_id, nom_groupe, chef_groupe) VALUES (?, ?, ?)", (USER_ID, nom_g, chef_g))
+                    execute_db("INSERT INTO me_equipes (user_id, nom_groupe, chef_groupe, membres) VALUES (?, ?, ?, ?)",
+                               (USER_ID, nom_g, chef_g, membres_g))
                     st.success("Équipe créée !")
                     st.rerun()
-        
-        eq_df = query_df("SELECT * FROM me_equipes WHERE user_id = ?", (USER_ID,))
+
+        eq_df = query_df("SELECT nom_groupe, chef_groupe, membres FROM me_equipes WHERE user_id = ?", (USER_ID,))
         st.dataframe(eq_df, use_container_width=True)
 
 # --- TAB 5 : POINTAGES ---
 with main_tabs[4]:
-    st.subheader("⏰ Gestion des Pointages du Personnel")
+    st.subheader("⏰ Gestion des Pointages Journaliers")
     with st.form("f_pointage", clear_on_submit=True):
-        col_p1, col_p2 = st.columns(2)
+        col_p1, col_p2, col_p3 = st.columns(3)
         with col_p1:
-            d_point = st.date_input("Date du Pointage", value=date.today())
+            d_pointage = st.date_input("Date", value=date.today())
             emp_list = query_df("SELECT nom FROM me_employes WHERE user_id = ?", (USER_ID,))['nom'].tolist()
-            emp_p = st.selectbox("Employé", emp_list if emp_list else ["Aucun employé"])
-            stat_p = st.selectbox("Statut de Présence", ["Présent", "Absent", "Demi-journée", "En Congé"])
+            emp_p = st.selectbox("Employé *", emp_list if emp_list else ["Aucun employé"])
         with col_p2:
-            h_eff = st.number_input("Heures Effectives", value=8.0, step=0.5)
-            rem_p = st.text_input("Remarques / Activité")
+            stat_p = st.selectbox("Statut Présence", ["Présent", "Absent", "Demi-journée", "Congé"])
+            h_eff = st.number_input("Heures Effectives", min_value=0.0, max_value=16.0, value=8.0)
+        with col_p3:
+            rem_p = st.text_input("Remarques / Tâche")
 
         if st.form_submit_button("Enregistrer le Pointage"):
             if emp_p and emp_p != "Aucun employé":
                 execute_db("""
                     INSERT INTO me_pointage (user_id, date, employe_nom, champ_nom, statut_presence, heures_effectives, remarque)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (USER_ID, str(d_point), emp_p, parcelle_active_nom, stat_p, h_eff, rem_p))
+                """, (USER_ID, str(d_pointage), emp_p, parcelle_active_nom, stat_p, h_eff, rem_p))
                 st.success("Pointage enregistré !")
                 st.rerun()
 
     st.divider()
-    st.write("#### 📜 Historique Récent des Pointages")
-    p_df = query_df("SELECT date, employe_nom, champ_nom, statut_presence, heures_effectives, remarque FROM me_pointage WHERE user_id = ? ORDER BY date DESC LIMIT 30", (USER_ID,))
-    st.dataframe(p_df, use_container_width=True)
+    point_df = query_df("SELECT date, employe_nom, champ_nom, statut_presence, heures_effectives, remarque FROM me_pointage WHERE user_id = ? ORDER BY date DESC LIMIT 30", (USER_ID,))
+    st.dataframe(point_df, use_container_width=True)
 
 # --- TAB 6 : TRAVAUX & MATÉRIEL ---
 with main_tabs[5]:
     st.subheader("📅 Tâches, Travaux & Gestion du Matériel")
-    t_tab1, t_tab2 = st.tabs(["📋 Suivi des Tâches", "🚜 Parc Matériel"])
+    t_tab1, t_tab2 = st.tabs(["📝 Planning Tâches", "🚜 Parc Matériel"])
 
     with t_tab1:
-        with st.form("f_tache", clear_on_submit=True):
-            col_t1, col_t2 = st.columns(2)
-            with col_t1:
-                type_t = st.text_input("Type de Travail *", placeholder="Ex: Labourage, Traitement Phytosanitaire")
-                desc_t = st.text_area("Description des Travaux")
-                d_tache = st.date_input("Date Prévue", value=date.today())
-            with col_t2:
-                prio_t = st.selectbox("Priorité", ["Normale", "Haute", "Urgente"])
-                stat_t = st.selectbox("Statut Tâche", ["En Attente", "En Cours", "Terminé"])
-                h_tache = st.number_input("Heures estimées / réalisées", value=4.0)
-
-            if st.form_submit_button("Créer la Tâche"):
-                if type_t:
+        with st.form("f_add_task", clear_on_submit=True):
+            desc_t = st.text_input("Titre / Description de la tâche *")
+            type_t = st.selectbox("Type de travaux", ["Labour", "Semis", "Irrigation", "Traitement", "Récolte", "Entretien"])
+            date_t = st.date_input("Date Prévue", value=date.today())
+            prio_t = st.selectbox("Priorité", ["Normale", "Haute", "Urgente"])
+            stat_t = st.selectbox("Statut", ["À faire", "En cours", "Terminé"])
+            if st.form_submit_button("Planifier Tâche"):
+                if desc_t:
                     execute_db("""
-                        INSERT INTO me_taches (user_id, champ_id, type_travail, description, date_tache, heures_travaillees, priorite, statut)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (USER_ID, champ_id_actif, type_t, desc_t, str(d_tache), h_tache, prio_t, stat_t))
-                    st.success("Tâche créée !")
+                        INSERT INTO me_taches (user_id, champ_id, type_travail, description, date_tache, priorite, statut)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (USER_ID, champ_id_actif, type_t, desc_t, str(date_t), prio_t, stat_t))
+                    st.success("Tâche ajoutée !")
                     st.rerun()
 
-        taches_df = query_df("SELECT type_travail, description, date_tache, heures_travaillees, priorite, statut FROM me_taches WHERE user_id = ? ORDER BY id DESC", (USER_ID,))
+        taches_df = query_df("SELECT type_travail, description, date_tache, priorite, statut FROM me_taches WHERE user_id = ?", (USER_ID,))
         st.dataframe(taches_df, use_container_width=True)
 
     with t_tab2:
-        with st.form("f_mat", clear_on_submit=True):
-            nom_m = st.text_input("Nom du Matériel *", placeholder="Ex: Tracteur Massey Ferguson")
-            cat_m = st.selectbox("Catégorie", ["Tracteur / Engin", "Outillage à Main", "Système Irrigation", "Pulvérisateur", "Autre"])
-            etat_m = st.selectbox("État", ["Neuf", "Bon état", "En Panne / Réparation", "Hors d'usage"])
-            d_acq = st.date_input("Date d'acquisition", value=date.today())
-            if st.form_submit_button("Ajouter le Matériel"):
+        with st.form("f_add_mat", clear_on_submit=True):
+            nom_m = st.text_input("Nom de l'équipement *", placeholder="Ex: Motopompe 5HP")
+            cat_m = st.selectbox("Catégorie", ["Outillage", "Irrigation", "Tracteur/Véhicule", "Traitement"])
+            etat_m = st.selectbox("État Fonctionnel", ["Neuf", "Bon état", "A réviser", "En panne"])
+            if st.form_submit_button("Ajouter Equipement"):
                 if nom_m:
-                    execute_db("INSERT INTO me_materiel (user_id, nom_materiel, categorie, etat, date_acquisition) VALUES (?, ?, ?, ?, ?)",
-                               (USER_ID, nom_m, cat_m, etat_m, str(d_acq)))
+                    execute_db("INSERT INTO me_materiel (user_id, nom_materiel, categorie, etat) VALUES (?, ?, ?, ?)",
+                               (USER_ID, nom_m, cat_m, etat_m))
                     st.success("Matériel enregistré !")
                     st.rerun()
 
-        mat_df = query_df("SELECT nom_materiel, categorie, etat, date_acquisition FROM me_materiel WHERE user_id = ?", (USER_ID,))
+        mat_df = query_df("SELECT nom_materiel, categorie, etat FROM me_materiel WHERE user_id = ?", (USER_ID,))
         st.dataframe(mat_df, use_container_width=True)
 
 # --- TAB 7 : ÉLEVAGE ---
 with main_tabs[6]:
-    st.subheader("🐓 Gestion de l'Élevage")
-    with st.form("f_elevage", clear_on_submit=True):
-        col_e1, col_e2 = st.columns(2)
-        with col_e1:
-            type_anim = st.selectbox("Type d'Animaux", ["Bovins (Vaches/Bœufs)", "Oovins (Moutons)", "Caprins (Chèvres)", "Volailles (Poulets)", "Porcins"])
+    st.subheader("🐓 Suivi du Bétail & Élevage")
+    with st.form("f_add_elev", clear_on_submit=True):
+        c_el1, c_el2 = st.columns(2)
+        with c_el1:
+            type_anim = st.selectbox("Espèce", ["Volailles", "Bovins", "Ovins", "Caprins", "Porcins", "Autre"])
             race_anim = st.text_input("Race / Variété")
-            qte_anim = st.number_input("Nombre de Têtes", min_value=1, value=10)
-        with col_e2:
-            d_arriv = st.date_input("Date d'arrivée / Naissance", value=date.today())
-            stat_san = st.selectbox("Statut Sanitaire", ["Sain / Vacciné", "Sous Traitement", "Quarantaine"])
-
-        if st.form_submit_button("Enregistrer le Cheptel"):
-            execute_db("INSERT INTO me_elevage (user_id, type_animaux, race, quantite, date_arrivee, statut_sanitaire) VALUES (?, ?, ?, ?, ?, ?)",
-                       (USER_ID, type_anim, race_anim, qte_anim, str(d_arriv), stat_san))
-            st.success("Bétail enregistré !")
+        with c_el2:
+            qte_anim = st.number_input("Nombre de têtes", min_value=1, value=10)
+            san_anim = st.selectbox("Statut Sanitaire", ["Excellent", "Vacciné", "Sous traitement", "Alerte maladie"])
+        if st.form_submit_button("Enregistrer Bande / Cheptel"):
+            execute_db("""
+                INSERT INTO me_elevage (user_id, type_animaux, race, quantite, statut_sanitaire, date_arrivee)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (USER_ID, type_anim, race_anim, qte_anim, san_anim, str(date.today())))
+            st.success("Élevage mis à jour !")
             st.rerun()
 
-    elev_df = query_df("SELECT type_animaux, race, quantite, date_arrivee, statut_sanitaire FROM me_elevage WHERE user_id = ?", (USER_ID,))
+    elev_df = query_df("SELECT type_animaux, race, quantite, statut_sanitaire, date_arrivee FROM me_elevage WHERE user_id = ?", (USER_ID,))
     st.dataframe(elev_df, use_container_width=True)
 
 # --- TAB 8 : PISCICULTURE ---
 with main_tabs[7]:
-    st.subheader("🐟 Suivi Pisciculture & Aquaculture")
-    with st.form("f_aqua", clear_on_submit=True):
-        col_a1, col_a2 = st.columns(2)
-        with col_a1:
-            nom_bassin = st.text_input("Identifiant du Bassin *", value="Bassin #1")
-            esp_poisson = st.selectbox("Espèce Élevée", ["Tilapia", "Poisson-Chat (Clarias)", "Carpe"])
-            nb_alv = st.number_input("Nombre d'Alevins Introduits", value=500)
-        with col_a2:
-            alim_kg = st.number_input("Nourriture distribuée (Kg/jour)", value=5.0)
-            ph_w = st.number_input("Mesure du pH de l'Eau", value=7.2, min_value=0.0, max_value=14.0)
+    st.subheader("🐟 Suivi Aquacole & Pisciculture")
+    with st.form("f_add_aqua", clear_on_submit=True):
+        bassin_nom = st.text_input("Nom / N° du Bassin *", placeholder="Ex: Bassin A1")
+        espece_p = st.selectbox("Espèce Élevée", ["Tilapia", "Poisson-chat (Clarias)", "Carpe"])
+        nb_alv = st.number_input("Nombre d'alvins déversés", min_value=0, value=500)
+        ph_val = st.number_input("pH Eau Actuel", min_value=0.0, max_value=14.0, value=7.2)
+        if st.form_submit_button("Enregistrer Bassin"):
+            if bassin_nom:
+                execute_db("""
+                    INSERT INTO me_aquaculture (user_id, nom_bassin, espece_poisson, nombre_alvins, ph_eau)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (USER_ID, bassin_nom, espece_p, nb_alv, ph_val))
+                st.success("Bassin enregistré !")
+                st.rerun()
 
-        if st.form_submit_button("Enregistrer les données Pisciculture"):
-            execute_db("INSERT INTO me_aquaculture (user_id, nom_bassin, espece_poisson, nombre_alvins, aliment_kg, ph_eau) VALUES (?, ?, ?, ?, ?, ?)",
-                       (USER_ID, nom_bassin, esp_poisson, nb_alv, alim_kg, ph_w))
-            st.success("Données de bassin sauvegardées !")
-            st.rerun()
-
-    aqua_df = query_df("SELECT nom_bassin, espece_poisson, nombre_alvins, aliment_kg, ph_eau FROM me_aquaculture WHERE user_id = ?", (USER_ID,))
+    aqua_df = query_df("SELECT nom_bassin, espece_poisson, nombre_alvins, ph_eau FROM me_aquaculture WHERE user_id = ?", (USER_ID,))
     st.dataframe(aqua_df, use_container_width=True)
 
 # --- TAB 9 : RÉCOLTES ---
 with main_tabs[8]:
-    st.subheader("🌾 Suivi des Récoltes & Production")
-    with st.form("f_recolte", clear_on_submit=True):
-        col_r1, col_r2 = st.columns(2)
-        with col_r1:
-            cult_rec = st.text_input("Culture Récoltée *", value="Tomates")
-            qte_rec = st.number_input("Quantité Récoltée (Kg)", value=100.0)
-        with col_r2:
+    st.subheader("🌾 Journal des Récoltes")
+    with st.form("f_add_rec", clear_on_submit=True):
+        c_r1, c_r2 = st.columns(2)
+        with c_r1:
+            cult_r = st.text_input("Culture récoltée *", value="Tomate")
+            qte_r = st.number_input("Quantité Récoltée (Kg)", min_value=0.0, value=100.0)
+        with c_r2:
             d_rec = st.date_input("Date Récolte", value=date.today())
-            pu_rec = st.number_input("Prix Vente Estimé / Kg (FCFA)", value=500.0)
+            pu_r = st.number_input("Prix Vente Moyen / Kg (FCFA)", min_value=0.0, value=500.0)
 
         if st.form_submit_button("Enregistrer la Récolte"):
-            if cult_rec:
+            if cult_r:
                 execute_db("""
                     INSERT INTO me_recoltes (user_id, champ_id, culture, date_recolte, quantite_kg, prix_unitaire)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (USER_ID, champ_id_actif, cult_rec, str(d_rec), qte_rec, pu_rec))
-                st.success("Récolte enregistrée !")
+                """, (USER_ID, champ_id_actif, cult_r, str(d_rec), qte_r, pu_r))
+                st.success("Récolte ajoutée !")
                 st.rerun()
 
-    recoltes_df = query_df("SELECT culture, date_recolte, quantite_kg, prix_unitaire, (quantite_kg * prix_unitaire) as valeur_totale FROM me_recoltes WHERE user_id = ? ORDER BY date_recolte DESC", (USER_ID,))
-    st.dataframe(recoltes_df, use_container_width=True)
+    rec_df = query_df("SELECT culture, date_recolte, quantite_kg, prix_unitaire, (quantite_kg * prix_unitaire) as valeur_totale FROM me_recoltes WHERE user_id = ?", (USER_ID,))
+    st.dataframe(rec_df, use_container_width=True)
 
 # --- TAB 10 : FINANCES ---
 with main_tabs[9]:
-    st.subheader("💰 Gestion Financière & Dépenses")
-    fin_t1, fin_t2 = st.tabs(["💸 Enregistrer une Dépense", "📦 Gestion des Intrants & Stock"])
+    st.subheader("💰 Suivi Financier & Dépenses")
+    with st.form("f_add_dep", clear_on_submit=True):
+        type_d = st.selectbox("Poste de Dépense", ["Intrants/Engrais", "Semences", "Carburant", "Main d'œuvre", "Entretien Matériel", "Autre"])
+        montant_d = st.number_input("Montant (FCFA)", min_value=0.0, value=5000.0)
+        date_d = st.date_input("Date", value=date.today())
+        if st.form_submit_button("Valider la Dépense"):
+            execute_db("""
+                INSERT INTO me_depenses (user_id, champ_id, type, montant, date)
+                VALUES (?, ?, ?, ?, ?)
+            """, (USER_ID, champ_id_actif, type_d, montant_d, str(date_d)))
+            st.success("Dépense comptabilisée !")
+            st.rerun()
 
-    with fin_t1:
-        with st.form("f_depense", clear_on_submit=True):
-            type_d = st.selectbox("Type de Dépense", ["Achat Engrais/Semences", "Carburant", "Entretien Matériel", "Main d'œuvre / Salaires", "Autre"])
-            montant_d = st.number_input("Montant (FCFA) *", min_value=100.0, value=5000.0)
-            d_depense = st.date_input("Date Dépense", value=date.today())
-
-            if st.form_submit_button("Enregistrer la Dépense"):
-                execute_db("INSERT INTO me_depenses (user_id, champ_id, type, montant, date) VALUES (?, ?, ?, ?, ?)",
-                           (USER_ID, champ_id_actif, type_d, montant_d, str(d_depense)))
-                st.success("Dépense enregistrée !")
-                st.rerun()
-
-        dep_df = query_df("SELECT type, montant, date FROM me_depenses WHERE user_id = ? ORDER BY date DESC", (USER_ID,))
-        st.dataframe(dep_df, use_container_width=True)
-
-    with fin_t2:
-        with st.form("f_intrant", clear_on_submit=True):
-            nom_i = st.text_input("Nom de l'Intrant / Produit *", placeholder="Ex: Engrais NPK 15-15-15")
-            cat_i = st.selectbox("Catégorie", ["Engrais / Fertilisant", "Semences", "Pesticide / Fongicide", "Aliment Bétail"])
-            stock_i = st.number_input("Quantité en Stock", value=10.0)
-            unite_i = st.selectbox("Unité", ["Kg", "Litres", "Sacs", "Tonnes"])
-            seuil_i = st.number_input("Seuil d'Alerte Réapprovisionnement", value=2.0)
-
-            if st.form_submit_button("Ajouter à l'Inventaire"):
-                if nom_i:
-                    execute_db("INSERT INTO me_intrants (user_id, nom, categorie, stock_actuel, unite, seuil_alerte) VALUES (?, ?, ?, ?, ?, ?)",
-                               (USER_ID, nom_i, cat_i, stock_i, unite_i, seuil_i))
-                    st.success("Stock mis à jour !")
-                    st.rerun()
-
-        int_df = query_df("SELECT nom, categorie, stock_actuel, unite, seuil_alerte FROM me_intrants WHERE user_id = ?", (USER_ID,))
-        st.dataframe(int_df, use_container_width=True)
+    dep_df = query_df("SELECT type, montant, date FROM me_depenses WHERE user_id = ? ORDER BY date DESC", (USER_ID,))
+    st.dataframe(dep_df, use_container_width=True)
 
 # --- TAB 11 : RAPPORTS AUTOMATISÉS ---
 with main_tabs[10]:
-    st.subheader("📄 Génération Automatisée de Rapports d'Exploitation PDF")
-    st.write("Téléchargez des synthèses complètes prêtes à l'impression pour vos audits, partenaires ou gestion interne.")
-
+    st.subheader("📄 Génération de Rapports PDF Automatisés")
+    st.write("Téléchargez un bilan analytique consolidé de l'ensemble des opérations du compte.")
+    
     col_rep1, col_rep2 = st.columns(2)
     with col_rep1:
-        st.markdown("#### 📆 Rapport Mensuel")
-        m_rep = st.selectbox("Mois", list(range(1, 13)), index=datetime.now().month - 1)
-        y_rep = st.number_input("Année", value=datetime.now().year, min_value=2020, max_value=2030)
-        
-        if st.button("🔄 Générer Rapport Mensuel (PDF)"):
-            pdf_data = generate_full_pdf_report(USER_DATA, f"Rapport Mensuel {m_rep:02d}/{y_rep}", filter_month=m_rep, filter_year=y_rep)
-            st.download_button(
-                label="📥 Télécharger le PDF Mensuel",
-                data=pdf_data,
-                file_name=f"Rapport_Mensuel_{y_rep}_{m_rep:02d}.pdf",
-                mime="application/pdf"
-            )
-
+        m_sel = st.selectbox("Mois du rapport", list(range(1, 13)), index=datetime.now().month - 1)
     with col_rep2:
-        st.markdown("#### 📋 Rapport Global Cumulative")
-        st.write("Inclut l'ensemble de vos données historiques (Parcelles, Personnels, Tâches, Récoltes et Finances).")
-        
-        if st.button("🔄 Générer Rapport Global (PDF)"):
-            pdf_data_global = generate_full_pdf_report(USER_DATA, "Rapport Global d'Exploitation")
-            st.download_button(
-                label="📥 Télécharger le PDF Global",
-                data=pdf_data_global,
-                file_name=f"Rapport_Global_Exploitation_{date.today()}.pdf",
-                mime="application/pdf"
-            )
+        y_sel = st.number_input("Année", min_value=2020, max_value=2030, value=datetime.now().year)
 
-# --- TAB 12 : SÉCURITÉ & DEMANDES D'ACCÈS (ADMIN UNIQUEMENT) ---
+    if st.button("📑 Générer le Rapport PDF Complète"):
+        pdf_bytes = generate_full_pdf_report(USER_DATA, f"Bilan Mensuel {m_sel:02d}/{y_sel}", filter_month=m_sel, filter_year=y_sel)
+        st.download_button(
+            label="💾 Télécharger le fichier PDF",
+            data=pdf_bytes,
+            file_name=f"Rapport_Exploitation_{m_sel:02d}_{y_sel}.pdf",
+            mime="application/pdf"
+        )
+
+# --- TAB 12 : SÉCURITÉ & ACCÈS (ADMIN UNIQUEMENT) ---
 if USER_DATA['gmail'].lower() == ADMIN_EMAIL.lower():
     with main_tabs[11]:
-        st.subheader("🛡️ Panneau d'Administration de la Sécurité & Autorisations")
+        st.subheader("🛡️ Panneau de Sécurité & Validation des Accès")
         
-        adm_sec1, adm_sec2, adm_sec3 = st.tabs([
-            "📥 Demandes d'Autorisation", 
-            "⚪ Liste Blanche (Whitelist)", 
-            "📋 Log des Accès (Audit Trail)"
-        ])
+        st.write("#### 1. ⚪ Gestion de la Whitelist (Adresses Autorisées)")
+        with st.form("f_add_whitelist", clear_on_submit=True):
+            new_w_email = st.text_input("Nouvelle Adresse Email à autoriser *").strip().lower()
+            desc_w = st.text_input("Description / Usage", placeholder="Ex: Technicien Zone Nord")
+            if st.form_submit_button("Ajouter à la Liste Blanche"):
+                if new_w_email:
+                    try:
+                        execute_db("INSERT INTO me_whitelist_emails (email, description, date_ajout) VALUES (?, ?, ?)",
+                                   (new_w_email, desc_w, str(datetime.now())))
+                        st.success(f"Email {new_w_email} ajouté à la Liste Blanche !")
+                        st.rerun()
+                    except sqlite3.IntegrityError:
+                        st.warning("Cet email existe déjà dans la Liste Blanche.")
 
-        # SECTION 1 : VALIDATION DES DEMANDES
-        with adm_sec1:
-            st.write("#### Validation des Demandes d'Accès")
-            filtre_statut = st.radio("Filtrer les demandes :", ["EN_ATTENTE", "TOUS", "APPROUVE", "REFUSE"], horizontal=True)
-            
-            if filtre_statut == "TOUS":
-                demandes_df = query_df("SELECT * FROM me_autorisations ORDER BY id DESC")
-            else:
-                demandes_df = query_df("SELECT * FROM me_autorisations WHERE statut = ? ORDER BY id DESC", (filtre_statut,))
+        wl_df = query_df("SELECT email, description, date_ajout FROM me_whitelist_emails ORDER BY id DESC")
+        st.dataframe(wl_df, use_container_width=True)
 
-            if not demandes_df.empty:
-                for _, req in demandes_df.iterrows():
-                    col_d1, col_d2, col_d3 = st.columns([3, 1, 1])
-                    with col_d1:
-                        st.write(f"👤 **{req['user_email']}** | Statut : `{req['statut']}` | Date : {req['date_demande']}")
-                    
-                    if req['statut'] == 'EN_ATTENTE':
-                        with col_d2:
-                            if st.button("🟢 Approuver", key=f"app_{req['id']}"):
-                                execute_db("UPDATE me_autorisations SET statut = 'APPROUVE', date_decision = ? WHERE id = ?", 
-                                           (str(datetime.now()), req['id']))
-                                log_acces(req['user_email'], "APPROVAL_ADMIN", "SUCCÈS", "Accès validé depuis le panneau admin.")
-                                st.success("Accès validé !")
-                                st.rerun()
-                        with col_d3:
-                            if st.button("🔴 Refuser", key=f"rej_{req['id']}"):
-                                execute_db("UPDATE me_autorisations SET statut = 'REFUSE', date_decision = ? WHERE id = ?", 
-                                           (str(datetime.now()), req['id']))
-                                log_acces(req['user_email'], "APPROVAL_ADMIN", "REFUSÉ", "Accès refusé depuis le panneau admin.")
-                                st.error("Accès refusé !")
-                                st.rerun()
-                    else:
-                        st.caption(f"Décision enregistrée le : {req['date_decision']}")
-                    st.divider()
-            else:
-                st.info("Aucune demande d'accès répertoriée.")
+        st.divider()
+        st.write("#### 2. ⏳ Demandes d'Autorisation en Attente")
+        reqs_df = query_df("SELECT * FROM me_autorisations WHERE statut = 'EN_ATTENTE'")
+        if not reqs_df.empty:
+            for _, r in reqs_df.iterrows():
+                col_r1, col_r2, col_r3 = st.columns([3, 1, 1])
+                col_r1.write(f"📧 **{r['user_email']}** *(Demande le {r['date_demande']})*")
+                if col_r2.button("🟢 Approuver", key=f"app_{r['id']}"):
+                    execute_db("UPDATE me_autorisations SET statut = 'APPROUVE', date_decision = ? WHERE id = ?", (str(datetime.now()), r['id']))
+                    log_acces(r['user_email'], "ADMIN_APPROVAL", "SUCCÈS", "Accès validé depuis l'interface admin.")
+                    st.success("Demande validée !")
+                    st.rerun()
+                if col_r3.button("🔴 Refuser", key=f"rej_{r['id']}"):
+                    execute_db("UPDATE me_autorisations SET statut = 'REFUSE', date_decision = ? WHERE id = ?", (str(datetime.now()), r['id']))
+                    log_acces(r['user_email'], "ADMIN_APPROVAL", "REFUSÉ", "Accès refusé depuis l'interface admin.")
+                    st.error("Demande rejetée !")
+                    st.rerun()
+        else:
+            st.info("Aucune demande d'accès en attente de validation.")
 
-        # SECTION 2 : WHITELIST
-        with adm_sec2:
-            st.write("#### Gestion de la Liste Blanche (Whitelist)")
-            with st.form("f_add_whitelist", clear_on_submit=True):
-                new_email = st.text_input("Adresse Email à pré-autoriser *").strip().lower()
-                desc_email = st.text_input("Description / Rôle", placeholder="Ex: Technicien Zone Nord")
-                if st.form_submit_button("Ajouter à la Liste Blanche"):
-                    if new_email:
-                        try:
-                            execute_db("INSERT INTO me_whitelist_emails (email, description, date_ajout) VALUES (?, ?, ?)",
-                                       (new_email, desc_email, str(datetime.now())))
-                            log_acces(new_email, "WHITELIST_ADD", "SUCCÈS", f"Ajouté par {USER_DATA['gmail']}")
-                            st.success(f"Adresse `{new_email}` ajoutée avec succès à la Whitelist !")
-                            st.rerun()
-                        except sqlite3.IntegrityError:
-                            st.warning("Cet e-mail figure déjà sur la Liste Blanche.")
-                    else:
-                        st.warning("Veuillez saisir un e-mail valide.")
-
-            st.divider()
-            st.write("##### Adresses Pré-autorisées actuelles")
-            whitelist_df = query_df("SELECT * FROM me_whitelist_emails ORDER BY id DESC")
-            st.dataframe(whitelist_df, use_container_width=True)
-
-        # SECTION 3 : AUDIT TRAIL / LOGS
-        with adm_sec3:
-            st.write("#### Journal des Événements & Audit Trail")
-            logs_df = query_df("SELECT * FROM me_logs_acces ORDER BY id DESC")
-            st.dataframe(logs_df, use_container_width=True)
+        st.divider()
+        st.write("#### 3. 📜 Logs de Traçabilité & Audit (Accès Système)")
+        logs_df = query_df("SELECT user_email, action, statut, date_evenement, details FROM me_logs_acces ORDER BY id DESC LIMIT 100")
+        st.dataframe(logs_df, use_container_width=True)
