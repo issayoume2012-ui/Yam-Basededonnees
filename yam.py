@@ -201,19 +201,19 @@ def query_db(query, params=(), one=False):
 
 def query_df(query, params=()):
     conn = get_db()
-    df = pd.read_sql_query(query, conn, params=params)
-    conn.close()
+    try:
+        # Utilisation de cursor pour exécuter proprement avec les paramètres sous SQLite
+        df = pd.read_sql_query(query, conn, params=params)
+    except Exception as e:
+        # Fallback de sécurité si le pilote sqlite3 pose problème avec les paramètres directs
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        data = cursor.fetchall()
+        columns = [description[0] for description in cursor.description] if cursor.description else []
+        df = pd.DataFrame(data, columns=columns)
+    finally:
+        conn.close()
     return df
-
-def execute_db(query, params=()):
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute(query, params)
-    conn.commit()
-    last_id = cursor.lastrowid
-    conn.close()
-    return last_id
-
 # ==========================================
 # FONCTIONS DE LOGS & ENVOI D'E-MAILS D'ACCÈS
 # ==========================================
