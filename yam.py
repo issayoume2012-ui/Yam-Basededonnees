@@ -21,14 +21,13 @@ from reportlab.lib import colors
 # ==========================================
 # CONFIGURATION SMTP / MAIL ADMIN
 # ==========================================
-ADMIN_EMAIL = "issayoume2012@gmail.com"      # Votre e-mail admin principal
-SMTP_SENDER = "issayoume2012@gmail.com"      # Votre e-mail d'envoi
-SMTP_PASSWORD = "qwhvzfvheaacdtsp"           # Mot de passe d'application Gmail
-APP_URL = "http://localhost:8501"            # Remplacez par votre URL de production
+ADMIN_EMAIL = "issayoume2012@gmail.com"
+SMTP_SENDER = "issayoume2012@gmail.com"
+SMTP_PASSWORD = "qwhvzfvheaacdtsp"
+APP_URL = "http://localhost:8501"
 
 # ==========================================
-# ==========================================
-# 0. BASE DE DONNÉES & FONCTIONS UTILITAIRES
+# 0. BASE DE DONNÉES & FONCTIONS ESSENTIELLES
 # ==========================================
 UPLOAD_DIR = "uploads"
 if not os.path.exists(UPLOAD_DIR):
@@ -78,18 +77,17 @@ def log_acces(email, action, statut, details=""):
         VALUES (?, ?, ?, ?, ?)
     """, (email, action, str(datetime.now()), statut, details))
 
+# --- INITIALISATION FORCÉE DES TABLES SQL ---
 def init_db():
     conn = get_db()
     cursor = conn.cursor()
     
-    # Table des techniciens/utilisateurs
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS me_tech (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nom TEXT, prenom TEXT, gmail TEXT UNIQUE, phone TEXT, matricule TEXT, password TEXT, sync_gdocs INTEGER
     )""")
 
-    # Table Whitelist (E-mails pré-autorisés)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS me_whitelist_emails (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -98,18 +96,16 @@ def init_db():
         date_ajout TEXT
     )""")
 
-    # Table des demandes d'autorisation d'accès (Demandes en attente)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS me_autorisations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_email TEXT,
         token TEXT UNIQUE,
-        statut TEXT, -- 'EN_ATTENTE', 'APPROUVE', 'REFUSE'
+        statut TEXT,
         date_demande TEXT,
         date_decision TEXT
     )""")
 
-    # Table des logs d'accès (Audit Trail / Traçabilité)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS me_logs_acces (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -120,18 +116,16 @@ def init_db():
         details TEXT
     )""")
 
-    # Table Fil de Discussion Commun (Techniciens)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS me_fil_discussion (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         auteur_nom TEXT,
         auteur_email TEXT,
         message TEXT,
-        type_message TEXT, -- 'INFO', 'ALERTE', 'QUESTION'
+        type_message TEXT,
         date_envoi TEXT
     )""")
 
-    # Table Base de Connaissances & Fiches Techniques Partagées
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS me_notes_partagees (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,7 +137,6 @@ def init_db():
         date_creation TEXT
     )""")
 
-    # Tables Métiers de Gestion de Ferme
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS me_champs (
         id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
@@ -218,7 +211,7 @@ def init_db():
         nom_bassin TEXT, espece_poisson TEXT, nombre_alvins INTEGER, aliment_kg REAL, ph_eau REAL
     )""")
 
-    # Inscription d'office de l'Admin dans la Whitelist et la table des comptes
+    # Ajout d'office de l'admin
     cursor.execute("INSERT OR IGNORE INTO me_whitelist_emails (email, description, date_ajout) VALUES (?, ?, ?)",
                    (ADMIN_EMAIL.lower(), "Administrateur Principal", str(datetime.now())))
     cursor.execute("INSERT OR IGNORE INTO me_tech (gmail, password, nom, prenom, sync_gdocs) VALUES (?, ?, ?, ?, 1)",
@@ -226,6 +219,8 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+init_db()
 
 init_db()
 
