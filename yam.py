@@ -3,21 +3,10 @@ import pandas as pd
 import sqlite3
 import os
 import hashlib
-import io
 import secrets
 import smtplib
-from datetime import datetime, date
+from datetime import datetime
 from email.mime.text import MIMEText
-
-# Cartographie dynamique
-import folium
-from streamlit_folium import st_folium
-
-# Exports PDF
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib import colors
 
 # ==========================================
 # CONFIGURATION SMTP / MAIL ADMIN
@@ -44,15 +33,15 @@ if not os.path.exists(UPLOAD_DIR):
 DB_FILE = "agri_database.db"
 
 def get_db():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=20)
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
     return conn
 
 def init_db():
     """Initialise la base de données et crée toutes les tables si elles n'existent pas."""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
         # Table Techniciens
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS me_tech (
@@ -189,7 +178,7 @@ def init_db():
             nom_bassin TEXT, espece_poisson TEXT, nombre_alvins INTEGER, aliment_kg REAL, ph_eau REAL
         )""")
 
-        # Insertion d'office de l'Admin principal
+        # Insertion de l'Admin principal par défaut
         cursor.execute("INSERT OR IGNORE INTO me_whitelist_emails (email, description, date_ajout) VALUES (?, ?, ?)",
                        (ADMIN_EMAIL.lower(), "Administrateur Principal", str(datetime.now())))
         
@@ -198,42 +187,55 @@ def init_db():
                        (ADMIN_EMAIL.lower(), admin_pwd_hash, "Admin", "System"))
 
         conn.commit()
+    finally:
+        conn.close()
 
-# FORCER L'INITIALISATION DE LA DB DÈS LE CHARGEMENT DE SCRIPT
+# Exécution de sécurité pour créer les tables
 init_db()
 
 def query_db(query, params=(), one=False):
-    """Effectue une requête sécurisée avec tentative de reconstruction si la table n'existe pas."""
+    """Effectue une requête SQL classique de manière sécurisée."""
+    conn = get_db()
     try:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            rv = cursor.fetchall()
-            return (rv[0] if rv else None) if one else rv
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        rv = cursor.fetchall()
+        return (rv[0] if rv else None) if one else rv
     except sqlite3.OperationalError:
-        # Re-crée les tables si elles manquent et réessaye
         init_db()
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            rv = cursor.fetchall()
-            return (rv[0] if rv else None) if one else rv
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        rv = cursor.fetchall()
+        return (rv[0] if rv else None) if one else rv
+    finally:
+        conn.close()
 
 def query_df(query, params=()):
+    """Lecture sécurisée d'un Dataframe Pandas (RÉSOLUTIF POUR L'ERREUR PANDAS)."""
+    conn = get_db()
     try:
-        with get_db() as conn:
-            return pd.read_sql_query(query, conn, params=params)
-    except Exception:
+        return pd.read_sql_query(query, conn, params=params)
+    except (pd.errors.DatabaseError, sqlite3.OperationalError):
+        # Si la table n'existe pas ou la base est fermée, reconstruire et réessayer
         init_db()
-        with get_db() as conn:
-            return pd.read_sql_query(query, conn, params=params)
+        conn = get_db()
+        return pd.read_sql_query(query, conn, params=params)
+    except Exception:
+        # Retourne un DataFrame vide au lieu de faire planter Streamlit
+        return pd.DataFrame()
+    finally:
+        conn.close()
 
 def execute_db(query, params=()):
-    with get_db() as conn:
+    conn = get_db()
+    try:
         cursor = conn.cursor()
         cursor.execute(query, params)
         conn.commit()
         return cursor.lastrowid
+    finally:
+        conn.close()
 
 # ==========================================
 # FONCTIONS LOGS & ENVOI D'E-MAILS
@@ -430,7 +432,9 @@ with col_h2:
         st.session_state.pending_token_hash = None
         st.rerun()
 
+# --- LIGNE 433 SÉCURISÉE ---
 champs_df = query_df("SELECT * FROM me_champs WHERE user_id = ?", (USER_ID,))
+
 if not champs_df.empty:
     liste_champs = {row['nom']: (row['id'], row['latitude'], row['longitude']) for _, row in champs_df.iterrows()}
     if "selected_parcelle_name" not in st.session_state or st.session_state.selected_parcelle_name not in liste_champs:
@@ -453,12 +457,11 @@ if USER_DATA['gmail'].lower() == ADMIN_EMAIL.lower():
 
 main_tabs = st.tabs(tabs_titles)
 
-# --- TAB 1 : DASHBOARD (OÙ L'ERREUR ÉTAIT PRÉSENTE) ---
+# --- TAB 1 : DASHBOARD ---
 with main_tabs[0]:
     st.subheader("📊 Aperçu Général de l'Exploitation")
     k1, k2, k3, k4 = st.columns(4)
 
-    # REQUÊTES SÉCURISÉES AVEC GESTION DES VALEURS NULL
     surf_tot_req = query_db("SELECT SUM(superficie_ha) as total FROM me_champs WHERE user_id = ?", (USER_ID,), one=True)
     surf_tot = surf_tot_req['total'] if (surf_tot_req and surf_tot_req['total'] is not None) else 0.0
 
@@ -484,7 +487,6 @@ with main_tabs[0]:
 # --- TAB 2 : ESPACE COMMUN TECHNICIENS ---
 with main_tabs[1]:
     st.subheader("🤝 Espace Commun de Collaboration entre Techniciens")
-    
     comm_t1, comm_t2 = st.tabs(["💬 Fil d'Actualité", "📚 Base de Connaissances"])
 
     with comm_t1:
@@ -510,7 +512,8 @@ with main_tabs[1]:
 
     with comm_t2:
         notes_df = query_df("SELECT * FROM me_notes_partagees ORDER BY id DESC")
-        st.dataframe(notes_df, use_container_width=True)
+        if not notes_df.empty:
+            st.dataframe(notes_df, use_container_width=True)
 
 # --- TAB 3 : PARCELLES ET HISTORIQUE ---
 with main_tabs[2]:
